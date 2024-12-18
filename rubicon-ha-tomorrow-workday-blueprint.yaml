@@ -1,0 +1,79 @@
+blueprint:
+  name: Update Tomorrow Workday Status
+  description: >
+    Check if tomorrow is a workday or school day and update the specified input boolean accordingly.
+  domain: automation
+  input:
+    workday_sensors:
+      name: Workday Binary Sensors
+      description: >
+        Select one or more binary sensors that indicate workday status.
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    schoolday_sensors:
+      name: School Day Binary Sensors
+      description: >
+        Select one or more binary sensors that indicate school day status.
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    output_boolean:
+      name: Output Input Boolean
+      description: >
+        The input boolean to turn on/off based on the check.
+      selector:
+        entity:
+          domain: input_boolean
+    trigger_time:
+      name: Trigger Time
+      description: >
+        Time to run the automation (HH:MM:SS format).
+      selector:
+        time: {}
+      default: "00:01:00"
+
+  source_url: https://github.com/your-repo-url # Replace with your blueprint URL
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input trigger_time
+
+variables:
+  tomorrow_date: "{{ (now() + timedelta(days=1)).date() }}"
+
+action:
+  - service: workday.check_date
+    target:
+      entity_id:
+        - !input workday_sensors
+        - !input schoolday_sensors
+    data:
+      check_date: "{{ tomorrow_date }}"
+    response_variable: is_tomorrow_work_or_school_day
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{
+              is_tomorrow_work_or_school_day | selectattr('workday', 'eq', true) | list | count > 0
+              }}
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input output_boolean
+      - conditions:
+          - condition: template
+            value_template: >
+              {{
+              is_tomorrow_work_or_school_day | selectattr('workday', 'eq', true) | list | count == 0
+              }}
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input output_boolean
