@@ -1,0 +1,131 @@
+blueprint:
+  name: Update Tomorrow Work/School Night Status (Enhanced)
+  description: >
+    Determines whether tomorrow is a workday or school day and updates separate input booleans accordingly.
+
+    This enhanced blueprint runs at a specified time daily AND reacts to workday sensor state changes
+    in real-time to ensure your automations always have the most up-to-date information about tomorrow's schedule.
+
+    Features:
+    - Separate outputs for work night and school night status
+    - Real-time updates when workday sensors change state
+    - Supports multiple workday and school day sensors
+    - Uses the workday.check_date service to verify tomorrow's status
+  domain: automation
+  input:
+    workday_sensor:
+      name: Workday Binary Sensor
+      description: >
+        Select the binary sensor that indicates workday status.
+      selector:
+        entity:
+          domain: binary_sensor
+    schoolday_sensor:
+      name: School Day Binary Sensor
+      description: >
+        Select the binary sensor that indicates school day status.
+      selector:
+        entity:
+          domain: binary_sensor
+    work_night_boolean:
+      name: Work Night Input Boolean
+      description: >
+        The input boolean to turn on/off based on whether tomorrow is a workday.
+      selector:
+        entity:
+          domain: input_boolean
+    school_night_boolean:
+      name: School Night Input Boolean
+      description: >
+        The input boolean to turn on/off based on whether tomorrow is a school day.
+      selector:
+        entity:
+          domain: input_boolean
+    trigger_time:
+      name: Trigger Time
+      description: >
+        Time to run the daily check (HH:MM:SS format).
+      selector:
+        time: {}
+      default: "00:00:00"
+    enable_state_triggers:
+      name: Enable Real-Time State Triggers
+      description: >
+        Enable triggers for real-time updates when workday sensor states change.
+        Recommended to keep this ON for the most accurate results.
+      selector:
+        boolean: {}
+      default: true
+
+  source_url: https://github.com/rubicon/rubicon-ha-tomorrow-workday-blueprint
+  homeassistant:
+    min_version: "2023.7.0"
+
+mode: single
+
+trigger:
+  # Daily time trigger
+  - platform: time
+    at: !input trigger_time
+    id: time_trigger
+
+  # State change triggers (when enabled)
+  - platform: state
+    entity_id: !input workday_sensor
+    to: "on"
+    id: state_trigger
+    enabled: !input enable_state_triggers
+
+  - platform: state
+    entity_id: !input workday_sensor
+    to: "off"
+    id: state_trigger
+    enabled: !input enable_state_triggers
+
+  - platform: state
+    entity_id: !input schoolday_sensor
+    to: "on"
+    id: state_trigger
+    enabled: !input enable_state_triggers
+
+  - platform: state
+    entity_id: !input schoolday_sensor
+    to: "off"
+    id: state_trigger
+    enabled: !input enable_state_triggers
+
+variables:
+  tomorrow_date: "{{ (now() + timedelta(days=1)).date() }}"
+  workday_sensor: !input workday_sensor
+  schoolday_sensor: !input schoolday_sensor
+
+action:
+  # Check if tomorrow is a workday
+  - service: workday.check_date
+    target:
+      entity_id: "{{ workday_sensor }}"
+    data:
+      check_date: "{{ tomorrow_date }}"
+    response_variable: is_tomorrow_a_work_day
+
+  # Check if tomorrow is a school day
+  - service: workday.check_date
+    target:
+      entity_id: "{{ schoolday_sensor }}"
+    data:
+      check_date: "{{ tomorrow_date }}"
+    response_variable: is_tomorrow_a_school_day
+
+  # Update work night boolean
+  - service: >
+      input_boolean.turn_{{ 'on' if
+      is_tomorrow_a_work_day[workday_sensor]['workday'] else 'off' }}
+    target:
+      entity_id: !input work_night_boolean
+
+  # Update school night boolean
+  - service: >
+      input_boolean.turn_{{ 'on' if
+      is_tomorrow_a_school_day[schoolday_sensor]['workday'] else 'off' }}
+    target:
+      entity_id: !input school_night_boolean
