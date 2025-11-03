@@ -2,6 +2,7 @@ blueprint:
   name: Update Tomorrow Workday Status
   description: >
     Check if tomorrow is a workday or school day and update the specified input boolean accordingly.
+    Runs at a specified time daily to check if tomorrow is a workday based on selected workday sensors.
   domain: automation
   input:
     workday_sensors:
@@ -35,7 +36,9 @@ blueprint:
         time: {}
       default: "00:01:00"
 
-  source_url: https://github.com/your-repo-url # Replace with your blueprint URL
+  source_url: https://github.com/rubicon/rubicon-ha-tomorrow-workday-blueprint
+  homeassistant:
+    min_version: "2023.7.0"
 
 mode: single
 
@@ -45,35 +48,57 @@ trigger:
 
 variables:
   tomorrow_date: "{{ (now() + timedelta(days=1)).date() }}"
+  workday_sensors: !input workday_sensors
+  schoolday_sensors: !input schoolday_sensors
 
 action:
-  - service: workday.check_date
-    target:
-      entity_id:
-        - !input workday_sensors
-        - !input schoolday_sensors
-    data:
-      check_date: "{{ tomorrow_date }}"
-    response_variable: is_tomorrow_work_or_school_day
+  # Check all workday sensors
+  - repeat:
+      for_each: "{{ workday_sensors }}"
+      sequence:
+        - service: workday.check_date
+          target:
+            entity_id: "{{ repeat.item }}"
+          data:
+            check_date: "{{ tomorrow_date }}"
+          response_variable: "workday_check_{{ repeat.index }}"
 
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {{
-              is_tomorrow_work_or_school_day | selectattr('workday', 'eq', true) | list | count > 0
-              }}
-        sequence:
-          - service: input_boolean.turn_on
-            target:
-              entity_id: !input output_boolean
-      - conditions:
-          - condition: template
-            value_template: >
-              {{
-              is_tomorrow_work_or_school_day | selectattr('workday', 'eq', true) | list | count == 0
-              }}
-        sequence:
-          - service: input_boolean.turn_off
-            target:
-              entity_id: !input output_boolean
+  # Check all schoolday sensors
+  - repeat:
+      for_each: "{{ schoolday_sensors }}"
+      sequence:
+        - service: workday.check_date
+          target:
+            entity_id: "{{ repeat.item }}"
+          data:
+            check_date: "{{ tomorrow_date }}"
+          response_variable: "schoolday_check_{{ repeat.index }}"
+
+  # Aggregate results and update output boolean
+  - variables:
+      # Check if any workday sensor indicates tomorrow is a workday
+      any_workday: >
+        {% set ns = namespace(is_workday=false) %}
+        {% for i in range(workday_sensors | length) %}
+          {% set var_name = 'workday_check_' ~ (i + 1) %}
+          {% if var_name in _context %}
+            {% set sensor_id = workday_sensors[i] %}
+            {% if _context[var_name].get(sensor_id, {}).get('workday', false) %}
+              {% set ns.is_workday = true %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {% for i in range(schoolday_sensors | length) %}
+          {% set var_name = 'schoolday_check_' ~ (i + 1) %}
+          {% if var_name in _context %}
+            {% set sensor_id = schoolday_sensors[i] %}
+            {% if _context[var_name].get(sensor_id, {}).get('workday', false) %}
+              {% set ns.is_workday = true %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.is_workday }}
+
+  - service: "input_boolean.turn_{{ 'on' if any_workday else 'off' }}"
+    target:
+      entity_id: !input output_boolean
